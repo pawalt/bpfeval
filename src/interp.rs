@@ -7,6 +7,7 @@ impl Machine {
         match op {
             Imm(v) => *v as i64,
             Reg(r) => self.val_of_reg(*r),
+            Ind(reg, imm) => self.val_of_reg(*reg) + *imm as i64,
         }
     }
 
@@ -42,6 +43,25 @@ impl Machine {
             _ => panic!("non binop operator fed into binop!"),
         }
     }
+
+    pub fn exec_ld(&mut self, r: &Register, o: &Operand, size: i64) {
+        let mut load_addr = self.val_of_op(o) as u64;
+        // cut load_addr down to size
+        let num_cut = 64 - size;
+        load_addr = load_addr << num_cut;
+        load_addr = load_addr >> num_cut;
+        let to_store = self.mem[load_addr as usize];
+        self.put_reg(*r, to_store)
+    }
+
+    pub fn exec_str(&mut self, loc: &Operand, val: &Operand, size: i64) {
+        let mut str_addr = self.val_of_op(loc) as u64;
+        let num_cut = 64 - size;
+        str_addr = str_addr << num_cut;
+        str_addr = str_addr >> num_cut;
+        let to_store = self.val_of_op(val);
+        self.mem[str_addr as usize] = to_store;
+    }
 }
 
 pub fn run_tape(mach: &mut Machine) {
@@ -67,8 +87,23 @@ pub fn run_tape(mach: &mut Machine) {
                 );
                 mach.put_reg(*reg, to_store);
             },
+            Neg(reg) => {
+                let to_store = mach.val_of_reg(*reg) * -1;
+                mach.put_reg(*reg, to_store);
+            },
+            Lddw(reg, op) => {
+                let to_store = mach.val_of_op(op);
+                mach.put_reg(*reg, to_store);
+            },
+            Ldxdw(reg, op) => mach.exec_ld(reg, op, 64),
+            Ldxw(reg, op) => mach.exec_ld(reg, op, 32),
+            Ldxh(reg, op) => mach.exec_ld(reg, op, 16),
+            Ldxb(reg, op) => mach.exec_ld(reg, op, 8),
+            Stdw(loc, val) => mach.exec_str(loc, val, 64),
+            Stw(loc, val) => mach.exec_str(loc, val, 32),
+            Sth(loc, val) => mach.exec_str(loc, val, 16),
+            Stb(loc, val) => mach.exec_str(loc, val, 8),
             Stop => return,
-            _ => panic!("unexpected instruction"),
         }
     }
 }

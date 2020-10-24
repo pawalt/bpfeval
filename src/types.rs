@@ -27,6 +27,8 @@ pub enum Register {
 pub enum Operand {
     Imm (i32),
     Reg (Register),
+    // indirect for loads + stores
+    Ind (Register, i32)
 }
 
 #[derive(Copy, Clone)]
@@ -41,10 +43,28 @@ pub enum Insn {
     And (Register, Operand),
     Lsh (Register, Operand),
     Rsh (Register, Operand),
-    Neg (Register),
     Mod (Register, Operand),
     Xor (Register, Operand),
     Mov (Register, Operand),
     Arsh (Register, Operand),
+    Neg (Register),
+    // Load op into reg
+    Lddw (Register, Operand),
+    // Load op ind into reg (64-bit)
+    Ldxdw (Register, Operand),
+    // Load op ind into reg (32-bit)
+    Ldxw (Register, Operand),
+    // Load op ind into reg (16-bit)
+    Ldxh (Register, Operand),
+    // Load op ind into reg (8-bit)
+    Ldxb (Register, Operand),
+    // Load first operand into second (64-bit)
+    Stdw (Operand, Operand),
+    // Load first operand into second (32-bit)
+    Stw (Operand, Operand),
+    // Load first operand into second (16-bit)
+    Sth (Operand, Operand),
+    // Load first operand into second (8-bit)
+    Stb (Operand, Operand),
     Stop,
 }
