@@ -1,13 +1,48 @@
-use crate::types::*;
-use crate::types::Insn::*;
-use crate::types::Operand::*;
+use std::collections::HashMap;
+use crate::types::{
+    *,
+    Insn::*,
+    Operand::*,
+    Immediate::*,
+};
 
 impl Machine {
-    fn val_of_op(&self, op: &Operand) -> i64 {
+    pub fn new(tape: Vec<Insn>) -> Self {
+        Machine {
+            tape: tape,
+            regs: HashMap::new(),
+            mem: [0; MEM_SIZE],
+            pc: 0,
+            labels: HashMap::new(),
+        }
+    }
+
+    pub fn new_labeled(labeled_tape: Vec<LabeledTapeEntry>) -> Self {
+        let (map, tape) = delabel_tape(labeled_tape);
+        Machine {
+            tape: tape,
+            regs: HashMap::new(),
+            mem: [0; MEM_SIZE],
+            pc: 0,
+            labels: map,
+        }
+    }
+
+    fn val_of_op(&self, op: Operand) -> i64 {
         match op {
-            Imm(v) => *v as i64,
-            Reg(r) => self.val_of_reg(*r),
-            Ind(reg, imm) => self.val_of_reg(*reg) + *imm as i64,
+            Imm(imm) => self.val_of_imm(imm),
+            Reg(r) => self.val_of_reg(r),
+            Ind(reg, imm) => self.val_of_reg(reg) + self.val_of_imm(imm),
+        }
+    }
+
+    fn val_of_imm(&self, imm: Immediate) -> i64 {
+        match imm {
+            Val(i) => i as i64,
+            Lbl(l) => match self.labels.get(l) {
+                Some(s) => *s as i64 - (self.pc as i64) - 1,
+                None => panic!("could not find label"),
+            },
         }
     }
 
@@ -22,8 +57,8 @@ impl Machine {
         self.regs.insert(reg, val);
     }
 
-    fn val_of_binop(&self, insn: &Insn, r: &Register, o: &Operand) -> i64 {
-        let reg_val = self.val_of_reg(*r);
+    fn val_of_binop(&self, insn: Insn, r: Register, o: Operand) -> i64 {
+        let reg_val = self.val_of_reg(r);
         let op_val = self.val_of_op(o);
 
         match insn {
@@ -44,17 +79,17 @@ impl Machine {
         }
     }
 
-    pub fn exec_ld(&mut self, r: &Register, o: &Operand, size: i64) {
+    pub fn exec_ld(&mut self, r: Register, o: Operand, size: i64) {
         let mut load_addr = self.val_of_op(o) as u64;
         // cut load_addr down to size
         let num_cut = 64 - size;
         load_addr = load_addr << num_cut;
         load_addr = load_addr >> num_cut;
         let to_store = self.mem[load_addr as usize];
-        self.put_reg(*r, to_store)
+        self.put_reg(r, to_store)
     }
 
-    pub fn exec_str(&mut self, loc: &Operand, val: &Operand, size: i64) {
+    pub fn exec_str(&mut self, loc: Operand, val: Operand, size: i64) {
         let mut str_addr = self.val_of_op(loc) as u64;
         let num_cut = 64 - size;
         str_addr = str_addr << num_cut;
@@ -62,14 +97,66 @@ impl Machine {
         let to_store = self.val_of_op(val);
         self.mem[str_addr as usize] = to_store;
     }
+
+
+    fn exec_cnd_unsigned(&mut self, dst: Register, src: Operand, imm_offset: Immediate, cnd: impl Fn(u64, u64) -> bool) {
+        let dst_val = self.val_of_reg(dst) as u64;
+        let src_val = self.val_of_op(src) as u64;
+
+        let offset = self.val_of_imm(imm_offset);
+        if cnd(dst_val, src_val) {
+            // need to do this fanciness because mach.pc is a usize!
+            if offset.is_negative() {
+                self.pc -= offset.wrapping_abs() as usize
+            } else {
+                self.pc += offset as usize;
+            }
+        }
+    }
+
+    fn exec_cnd_signed(&mut self, dst: Register, src: Operand, imm_offset: Immediate, cnd: impl Fn(i64, i64) -> bool) {
+        let dst_val = self.val_of_reg(dst);
+        let src_val = self.val_of_op(src);
+
+        let offset = self.val_of_imm(imm_offset);
+        if cnd(dst_val, src_val) {
+            // need to do this fanciness because mach.pc is a usize!
+            if offset.is_negative() {
+                self.pc -= offset.wrapping_abs() as usize
+            } else {
+                self.pc += offset as usize;
+            }
+        }
+    }
+}
+
+pub fn delabel_tape(labeled_tape: Vec<LabeledTapeEntry>) -> (HashMap<&'static str, usize>, Vec<Insn>) {
+    let mut label_location_map: HashMap<&'static str, usize> = HashMap::new();
+    let mut insn_count = 0;
+    for entry in labeled_tape.iter() {
+        match entry {
+            LabeledTapeEntry::Lbl(s) => {label_location_map.insert(s, insn_count);},
+            LabeledTapeEntry::Insn(_) => insn_count += 1,
+        }
+    }
+
+    let mut final_tape = Vec::new();
+    for entry in labeled_tape.iter() {
+        match entry {
+            LabeledTapeEntry::Lbl(s) => (),
+            LabeledTapeEntry::Insn(i) => final_tape.push(*i),
+        }
+    }
+
+    return (label_location_map, final_tape);
 }
 
 pub fn run_tape(mach: &mut Machine) {
-    // have to clone here so that we still have mutable control of the tape
-    // there's definitely a better way to do this, but i dont wanna implement it
-    for insn in mach.tape.clone().iter() {
+    while mach.pc < mach.tape.len() {
+        let insn = mach.tape[mach.pc].clone();
+
         match insn {
-            // Start by matching all our ALU instructions
+            // ALU instructions
             Add(reg, op) |
             Sub(reg, op) |
             Mul(reg, op) |
@@ -85,25 +172,52 @@ pub fn run_tape(mach: &mut Machine) {
                 let to_store = mach.val_of_binop(
                     insn, reg, op
                 );
-                mach.put_reg(*reg, to_store);
+                mach.put_reg(reg, to_store);
             },
             Neg(reg) => {
-                let to_store = mach.val_of_reg(*reg) * -1;
-                mach.put_reg(*reg, to_store);
+                let to_store = mach.val_of_reg(reg) * -1;
+                mach.put_reg(reg, to_store);
             },
+
+            // Load instructions
             Lddw(reg, op) => {
                 let to_store = mach.val_of_op(op);
-                mach.put_reg(*reg, to_store);
+                mach.put_reg(reg, to_store);
             },
             Ldxdw(reg, op) => mach.exec_ld(reg, op, 64),
             Ldxw(reg, op) => mach.exec_ld(reg, op, 32),
             Ldxh(reg, op) => mach.exec_ld(reg, op, 16),
             Ldxb(reg, op) => mach.exec_ld(reg, op, 8),
+
+            // Store instructions
             Stdw(loc, val) => mach.exec_str(loc, val, 64),
             Stw(loc, val) => mach.exec_str(loc, val, 32),
             Sth(loc, val) => mach.exec_str(loc, val, 16),
             Stb(loc, val) => mach.exec_str(loc, val, 8),
+
+            // Jump
+            Ja(off) => mach.exec_cnd_signed(Register::R0, Imm(Val(12)), off, |_, _| true),
+
+            // Jump on equality
+            Jeq(dst, src, off) => mach.exec_cnd_unsigned(dst, src, off, |x, y| x == y),
+            Jne(dst, src, off) => mach.exec_cnd_unsigned(dst, src, off, |x, y| x != y),
+            Jset(dst, src, off) => mach.exec_cnd_unsigned(dst, src, off, |x, y| x & y != 0),
+
+            // Jump on unsigned conditional
+            Jgt(dst, src, off) => mach.exec_cnd_unsigned(dst, src, off, |x, y| x > y),
+            Jge(dst, src, off) => mach.exec_cnd_unsigned(dst, src, off, |x, y| x >= y),
+            Jlt(dst, src, off) => mach.exec_cnd_unsigned(dst, src, off, |x, y| x < y),
+            Jle(dst, src, off) => mach.exec_cnd_unsigned(dst, src, off, |x, y| x <= y),
+
+            // Jump on signed conditional
+            Jsgt(dst, src, off) => mach.exec_cnd_signed(dst, src, off, |x, y| x > y),
+            Jsge(dst, src, off) => mach.exec_cnd_signed(dst, src, off, |x, y| x >= y),
+            Jslt(dst, src, off) => mach.exec_cnd_signed(dst, src, off, |x, y| x < y),
+            Jsle(dst, src, off) => mach.exec_cnd_signed(dst, src, off, |x, y| x <= y),
+
             Stop => return,
         }
+
+        mach.pc += 1;
     }
 }

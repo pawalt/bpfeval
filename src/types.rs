@@ -15,6 +15,13 @@ pub struct Machine {
     pub tape: Vec<Insn>,
     pub regs: HashMap<Register, i64>,
     pub mem: [i64; MEM_SIZE],
+    pub pc: usize,
+    pub labels: HashMap<&'static str, usize>,
+}
+
+pub enum LabeledTapeEntry {
+    Lbl(&'static str),
+    Insn(Insn),
 }
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
@@ -23,13 +30,23 @@ pub enum Register {
 }
 
 #[derive(Copy, Clone)]
+pub enum Immediate {
+    Lbl(&'static str),
+    Val(i32),
+}
+
+#[derive(Copy, Clone)]
 // Operands can be immediate values or register values
 pub enum Operand {
-    Imm (i32),
+    Imm (Immediate),
     Reg (Register),
     // indirect for loads + stores
-    Ind (Register, i32)
+    Ind (Register, Immediate)
 }
+
+/*
+Excluding call + ret semantics for the moment
+*/
 
 #[derive(Copy, Clone)]
 // Instructions eom
@@ -66,5 +83,21 @@ pub enum Insn {
     Sth (Operand, Operand),
     // Load first operand into second (8-bit)
     Stb (Operand, Operand),
+    // Jump instructions
+    Ja (Immediate),
+    // unsigned operations
+    Jeq (Register, Operand, Immediate),
+    Jgt (Register, Operand, Immediate),
+    Jge (Register, Operand, Immediate),
+    Jlt (Register, Operand, Immediate),
+    Jle (Register, Operand, Immediate),
+    // condition is &
+    Jset (Register, Operand, Immediate),
+    Jne (Register, Operand, Immediate),
+    // signed operations
+    Jsgt (Register, Operand, Immediate),
+    Jsge (Register, Operand, Immediate),
+    Jslt (Register, Operand, Immediate),
+    Jsle (Register, Operand, Immediate),
     Stop,
 }
